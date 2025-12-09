@@ -1,0 +1,959 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>集贤作业 V20 </title>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <style>
+        :root {
+            --bg-dark: #0f172a;
+            --card-bg: #1e293b;
+            --text-main: #f8fafc;
+            --text-sub: #94a3b8;
+            --primary: #3b82f6;
+            
+            /* 状态色 */
+            --c-unchecked: #a78bfa; /* 紫 - 未检 */
+            --c-finished: #10b981;  /* 绿 - 完成 */
+            --c-unfinished: #ef4444;/* 红 - 未完 */
+            --c-makingup: #f59e0b;  /* 黄 - 补 */
+            
+            --c-exempt: #475569;    /* 深灰 - 免检 */
+            --c-note: #3b82f6;      /* 蓝 - 备注 */
+            
+            --c-lock: #ef4444;    
+            --c-unlock: #10b981;
+            
+            --shadow-card: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
+            --gradient-score: linear-gradient(135deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0.02) 100%);
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+        
+        body { 
+            background: var(--bg-dark); 
+            color: var(--text-main);
+            padding-bottom: 130px; 
+            overflow-x: hidden;
+            user-select: none;
+        }
+
+        /* --- Header --- */
+        .header {
+            background: rgba(15, 23, 42, 0.95);
+            backdrop-filter: blur(12px);
+            padding: 12px 16px;
+            position: sticky; top: 0; z-index: 50;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+            display: flex; justify-content: space-between; align-items: center;
+        }
+        .header-title { font-size: 1.1rem; font-weight: 800; background: linear-gradient(90deg, #60a5fa, #a78bfa); -webkit-background-clip: text; color: transparent; letter-spacing: 1px;}
+        .mode-badge { font-size: 0.75rem; padding: 4px 10px; border-radius: 20px; background: #334155; color: #aaa; transition: all 0.3s; display: flex; align-items: center; gap: 4px;}
+        .mode-badge.editing { background: rgba(16, 185, 129, 0.2); color: #10b981; border: 1px solid #10b981; }
+        .mode-badge.locked { background: rgba(239, 68, 68, 0.2); color: #ef4444; border: 1px solid #ef4444; }
+        .mode-badge.history { background: #f59e0b; color: black; font-weight: bold; }
+
+        /* --- Controls --- */
+        .controls { padding: 15px; background: linear-gradient(180deg, rgba(15,23,42,0) 0%, rgba(15,23,42,0.5) 100%); }
+        .input-group { margin-bottom: 12px; display: flex; flex-direction: column; gap: 10px; }
+        
+        input[type="date"], .task-input {
+            background: var(--card-bg); border: 1px solid #334155; color: white;
+            padding: 12px; border-radius: 12px; font-size: 1rem; outline: none; width: 100%;
+            transition: border-color 0.3s;
+        }
+        .task-input:focus { border-color: var(--primary); }
+
+        /* Subject Bar */
+        .subject-bar { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 8px; scrollbar-width: none; }
+        .sub-pill {
+            white-space: nowrap; padding: 8px 16px; border-radius: 12px;
+            background: rgba(255,255,255,0.05); color: var(--text-sub);
+            font-size: 0.85rem; border: 1px solid transparent; transition: all 0.2s;
+            cursor: pointer; user-select: none; display: flex; align-items: center;
+        }
+        .sub-pill.active {
+            background: rgba(59, 130, 246, 0.2); color: #60a5fa; border-color: #60a5fa;
+            box-shadow: 0 0 10px rgba(59, 130, 246, 0.1);
+            font-weight: bold;
+        }
+        /* 全检按钮特别样式 */
+        .sub-pill.all-btn { border: 1px solid #f59e0b; color: #f59e0b; margin-right: 10px; }
+        .sub-pill.all-btn.active { background: #f59e0b; color: #000; }
+
+        /* --- Grid --- */
+        .classroom-scroll { width: 100%; overflow-x: auto; padding: 0 15px 20px 15px; }
+        .grid-layout {
+            display: grid; grid-template-columns: repeat(7, minmax(72px, 1fr)); gap: 8px; min-width: 540px;
+        }
+
+        .card {
+            background: var(--card-bg); height: 75px; border-radius: 12px;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            position: relative; border: 1px solid rgba(255,255,255,0.05);
+            box-shadow: var(--shadow-card); transition: transform 0.1s;
+        }
+        .card:active { transform: scale(0.96); }
+        .grid-locked .card { opacity: 0.9; }
+        .grid-locked .card:active { transform: none; }
+
+        .c-name { font-size: 0.95rem; font-weight: 600; z-index: 2; text-align: center; }
+        .c-no { font-size: 0.7rem; color: #64748b; margin-top: 2px; }
+
+        /* Status Colors */
+        .card.unchecked { border: 1px solid var(--c-unchecked); background: rgba(167, 139, 250, 0.05); }
+        .card.unchecked .c-name { color: var(--c-unchecked); opacity: 0.9; }
+        .card.unchecked::after { content: '?'; position: absolute; top:2px; right:5px; font-size:0.8rem; color:var(--c-unchecked); opacity: 0.5;}
+
+        .card.finished { background: rgba(16, 185, 129, 0.15); border: 1px solid var(--c-finished); } 
+        .card.finished .c-name { color: var(--c-finished); }
+        
+        .card.unfinished { background: rgba(239, 68, 68, 0.15); border: 1px solid var(--c-unfinished); } 
+        .card.unfinished .c-name { color: var(--c-unfinished); }
+        
+        .card.making-up { background: rgba(245, 158, 11, 0.15); border: 1px solid var(--c-makingup); }
+        .card.making-up .c-name { color: var(--c-makingup); }
+        .card.making-up::after { content: '补'; position: absolute; top:2px; right:4px; font-size:0.6rem; color:var(--c-makingup); font-weight: bold;}
+
+        /* 免检状态 */
+        .card.fully-exempt { background: rgba(255, 255, 255, 0.03); border: 1px dashed var(--c-exempt); opacity: 0.6; } 
+        .card.fully-exempt .c-name { color: var(--text-sub); }
+        .card.fully-exempt::after { content: '免'; position: absolute; top:2px; right:4px; font-size:0.6rem; color:var(--text-sub); }
+
+        .card.has-note::before {
+            content: ''; position: absolute; top: 6px; left: 6px;
+            width: 8px; height: 8px; border-radius: 50%; background: var(--c-note);
+            box-shadow: 0 0 5px var(--c-note);
+        }
+
+        .card.suspended {
+            background: repeating-linear-gradient(45deg, #1e293b, #1e293b 10px, #0f172a 10px, #0f172a 20px);
+            opacity: 0.5; pointer-events: none;
+        }
+        .card.suspended .c-name { text-decoration: line-through; color:#666; }
+
+        .podium { text-align: center; color: #475569; font-size: 0.8rem; margin: 15px auto; width: 200px; border-top: 2px solid #334155; padding-top: 5px; }
+
+        /* --- Bottom Bar --- */
+        .bottom-bar {
+            position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+            width: 95%; max-width: 600px;
+            background: rgba(30, 41, 59, 0.95); backdrop-filter: blur(15px);
+            border: 1px solid rgba(255,255,255,0.1); border-radius: 50px;
+            padding: 8px 12px;
+            display: flex; justify-content: space-between; align-items: center;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.6); z-index: 100;
+        }
+        
+        .stat-box { display: flex; gap: 8px; font-size: 0.75rem; font-weight: 700; align-items: center; }
+        .stat-item { display:flex; align-items:center; }
+        .stat-num { font-size: 0.9rem; margin-left: 1px; }
+
+        .action-group { display: flex; gap: 8px; align-items: center; }
+        .btn-circle {
+            width: 40px; height: 40px; border-radius: 50%; border: none;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 1.1rem; cursor: pointer; color: white;
+            transition: all 0.2s;
+        }
+        .btn-menu { background: #475569; }
+        .btn-lock { background: var(--c-lock); box-shadow: 0 0 10px rgba(239, 68, 68, 0.4); }
+        .btn-lock.unlocked { background: var(--c-unlock); box-shadow: 0 0 10px rgba(16, 185, 129, 0.4); }
+        .btn-save { background: linear-gradient(135deg, #3b82f6, #2563eb); }
+
+        /* --- Modals --- */
+        .modal-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.85); z-index: 200; display: none;
+            backdrop-filter: blur(8px); align-items: center; justify-content: center;
+        }
+        .modal-card {
+            background: #1e293b; width: 95%; max-width: 420px; max-height: 90vh;
+            border-radius: 20px; padding: 25px; border: 1px solid rgba(255,255,255,0.1);
+            animation: popIn 0.2s; display: flex; flex-direction: column; overflow-y: auto;
+            box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+        }
+        @keyframes popIn { from { transform: scale(0.9); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+
+        .modal-title { font-size: 1.2rem; font-weight: 800; margin-bottom: 20px; color: white; text-align: center; letter-spacing: 1px;}
+        .modal-btn { width: 100%; padding: 12px; border-radius: 12px; border:none; color: white; font-weight: bold; margin-top: 10px; cursor: pointer; font-size: 1rem;}
+        
+        /* === 美化后的成绩面板 === */
+        .score-panel {
+            background: rgba(0,0,0,0.2);
+            border-radius: 16px;
+            padding: 15px; margin-bottom: 20px;
+            border: 1px solid rgba(255,255,255,0.05);
+        }
+        .score-title { font-size: 0.8rem; color: #94a3b8; margin-bottom: 10px; text-align: center; text-transform: uppercase; letter-spacing: 1px;}
+        
+        .score-grid { 
+            display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; 
+        }
+        .score-item { 
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            background: var(--gradient-score);
+            padding: 10px 5px; border-radius: 10px;
+            border: 1px solid rgba(255,255,255,0.05);
+        }
+        .sc-label { font-size: 0.75rem; color: #cbd5e1; margin-bottom: 4px; }
+        .sc-val { font-size: 1.1rem; font-weight: 800; color: #a78bfa; }
+        .sc-val.fail { color: #f87171; text-shadow: 0 0 10px rgba(239, 68, 68, 0.3); } 
+        .sc-val.pass { color: #34d399; }
+        
+        .score-total {
+            margin-top: 10px; background: rgba(255,255,255,0.05); padding: 10px; border-radius: 10px;
+            display: flex; justify-content: space-between; align-items: center;
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+
+        /* 弹窗内的状态操作 */
+        .sub-row { 
+            display: flex; align-items: center; justify-content: space-between; 
+            padding: 10px 0; border-bottom: 1px solid rgba(255,255,255,0.05);
+        }
+        .sub-row:last-child { border-bottom: none; }
+        .sub-name { font-weight: bold; color: white; width: 70px; }
+        .sub-ctrl { display: flex; gap: 5px; flex: 1; justify-content: flex-end; }
+        
+        .ctrl-btn { 
+            padding: 6px 10px; border-radius: 8px; border: 1px solid #475569; 
+            background: transparent; color: #94a3b8; font-size: 0.8rem; transition: all 0.2s;
+        }
+        .ctrl-btn:active { transform: scale(0.95); }
+        .ctrl-btn.active.finished { background: var(--c-finished); color: white; border-color: var(--c-finished); }
+        .ctrl-btn.active.unfinished { background: var(--c-unfinished); color: white; border-color: var(--c-unfinished); }
+        .ctrl-btn.active.making_up { background: var(--c-makingup); color: white; border-color: var(--c-makingup); }
+        .ctrl-btn.active.unchecked { background: var(--c-unchecked); color: white; border-color: var(--c-unchecked); }
+        
+        .exempt-badge {
+            background: rgba(100, 116, 139, 0.2); color: var(--c-exempt); 
+            padding: 6px 12px; border-radius: 8px; font-size: 0.8rem; font-weight: bold;
+            border: 1px solid var(--c-exempt); text-align: center; width: 100%;
+        }
+
+        .date-range-group { display: flex; flex-direction: column; gap: 10px; margin: 15px 0; }
+        .date-label { color: var(--text-sub); font-size: 0.9rem; margin-bottom: 2px; }
+
+        .history-list { max-height: 50vh; overflow-y: auto; }
+        .h-item { padding: 12px; border-bottom: 1px solid rgba(255,255,255,0.05); display: flex; justify-content: space-between; align-items: center; }
+        .h-info { flex: 1; cursor: pointer; }
+        .h-del-btn { background: rgba(239, 68, 68, 0.2); color: #ef4444; border: 1px solid #ef4444; width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; margin-left: 10px; cursor: pointer; }
+
+        textarea.note-area { width: 100%; height: 80px; background: rgba(0,0,0,0.3); border: 1px solid #334155; border-radius: 12px; color: white; padding: 12px; margin-bottom: 10px; resize: none; font-size: 1rem; }
+
+        .toast {
+            position: fixed; top: 40%; left: 50%; transform: translateX(-50%);
+            background: rgba(0,0,0,0.9); color: white; padding: 12px 24px;
+            border-radius: 30px; z-index: 300; display: none; font-size: 0.9rem; pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <div>
+            <span class="header-title">集贤作业 V20</span>
+        </div>
+        <div id="status-badge" class="mode-badge locked">🔒 已锁定</div>
+    </div>
+
+    <div class="controls">
+        <div class="input-group">
+            <input type="date" id="date-picker">
+            <input type="text" id="hw-content" class="task-input" placeholder="输入作业内容 (自动保存)...">
+        </div>
+        <div class="subject-bar" id="subject-container"></div>
+    </div>
+
+    <div class="classroom-scroll">
+        <div class="grid-layout grid-locked" id="grid"></div>
+        <div class="podium">讲 台 (点击检查 / 长按查看成绩)</div>
+    </div>
+
+    <div class="bottom-bar">
+        <div class="stat-box">
+            <div class="stat-item" style="color:var(--c-finished)">✔<span id="cnt-fin" class="stat-num">0</span></div>
+            <div class="stat-item" style="color:var(--c-unfinished)">✖<span id="cnt-unfin" class="stat-num">0</span></div>
+            <div class="stat-item" style="color:var(--c-makingup)">补<span id="cnt-make" class="stat-num">0</span></div>
+            <div class="stat-item" style="color:var(--c-unchecked)">未<span id="cnt-unch" class="stat-num">0</span></div>
+        </div>
+        <div class="action-group">
+            <button class="btn-circle btn-lock" id="btn-lock" onclick="toggleLock()">🔒</button>
+            <button class="btn-circle btn-menu" onclick="openMenu()">☰</button>
+            <button class="btn-circle btn-save" onclick="saveData(true)">💾</button>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="detail-modal">
+        <div class="modal-card">
+            <div class="modal-title"><span id="dm-name"></span></div>
+            
+            <div class="score-panel" id="score-display"></div>
+            
+            <div style="font-size:0.9rem; font-weight:bold; margin-bottom:10px; color:#e2e8f0; border-left:3px solid #3b82f6; padding-left:10px;">作业状态</div>
+            <div id="subject-list-container" class="subject-list"></div>
+            
+            <textarea id="dm-note" class="note-area" placeholder="在此输入额外备注..."></textarea>
+            <button class="modal-btn" style="background:#3b82f6;" onclick="saveDetail()">确定 (自动保存)</button>
+            <button class="modal-btn" style="background:transparent; color:#94a3b8; margin-top:0;" onclick="closeModal('detail-modal')">取消</button>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="menu-modal">
+        <div class="modal-card">
+            <div class="modal-title">功能菜单</div>
+            <button class="modal-btn" style="background:#334155;" onclick="openHistory()">📂 历史记录</button>
+            <button class="modal-btn" style="background:#059669;" onclick="openExportModal()">📊 导出 Excel</button>
+            <div style="display:flex; gap:10px; margin-top:10px;">
+                <button class="modal-btn" style="background:rgba(16,185,129,0.2); color:#10b981; margin-top:0;" onclick="batchSetAll('finished')">全员完成</button>
+                <button class="modal-btn" style="background:rgba(167,139,250,0.1); color:#a78bfa; margin-top:0;" onclick="batchSetAll('unchecked')">重置</button>
+            </div>
+            <button class="modal-btn" style="background:transparent; color:#94a3b8;" onclick="closeModal('menu-modal')">关闭</button>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="export-modal">
+        <div class="modal-card">
+            <div class="modal-title">导出记录</div>
+            <div class="date-range-group">
+                <label class="date-label">开始日期:</label>
+                <input type="date" id="export-start-date">
+                <label class="date-label" style="margin-top:5px;">结束日期:</label>
+                <input type="date" id="export-end-date">
+            </div>
+            <button class="modal-btn" style="background:#059669;" onclick="doExport()">生成 Excel</button>
+            <button class="modal-btn" style="background:transparent; color:#94a3b8;" onclick="closeModal('export-modal')">取消</button>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="history-modal">
+        <div class="modal-card">
+            <div class="modal-title">历史记录</div>
+            <div class="history-list" id="history-list"></div>
+            <button class="modal-btn" style="background:transparent; color:#94a3b8;" onclick="closeModal('history-modal')">关闭</button>
+        </div>
+    </div>
+
+    <div class="toast" id="toast">提示</div>
+
+    <script>
+        // === 1. 数据 ===
+        const scoreData = {
+            "蔡晓凤": { yw: 68.7, sx: 68.3, yy: 69.7, zz: 67.3, xx: 79.5, ty: 84.5, zh: 549 },
+            "曾如萍": { yw: 82, sx: 72.7, yy: 83.3, zz: 82.7, xx: 77, ty: 86, zh: 617.3 },
+            "曾雪凌": { yw: 62.3, sx: 76.7, yy: 58, zz: 80, xx: 74.5, ty: 83.5, zh: 523.3 },
+            "陈海林": { yw: 69, sx: 56.7, yy: 48.3, zz: 51.7, xx: 77, ty: 79.5, zh: 474.3 },
+            "陈俊兴": { yw: 59, sx: 83, yy: 69.5, zz: 47, xx: 71.5, ty: 77.5, zh: 508.3 },
+            "陈诗琪": { yw: 76.3, sx: 58.3, yy: 83.5, zz: 66.3, xx: 73.5, ty: 75, zh: 548.6 },
+            "陈诗钰": { yw: 75.7, sx: 57, yy: 78.7, zz: 56.7, xx: 81, ty: 77.8, zh: 533.8 },
+            "陈姝涵": { yw: 68.7, sx: 54, yy: 67.8, zz: 56.3, xx: 74.5, ty: 84.5, zh: 491.6 },
+            "陈涛": { yw: 70.3, sx: 97, yy: 77.3, zz: 83, xx: 96.5, ty: 91, zh: 627.4 },
+            "陈晓婷": { yw: 0, sx: 0, yy: 0, zz: 0, xx: 0, ty: 0, zh: 0 },
+            "陈毅斌": { yw: 26.7, sx: 19.3, yy: 30.8, zz: 21.3, xx: 24, ty: 54.8, zh: 213.1 },
+            "陈子桢": { yw: 66.7, sx: 60.7, yy: 45.5, zz: 46.3, xx: 67.5, ty: 79, zh: 467.3 },
+            "董泽坤": { yw: 63.7, sx: 61.3, yy: 60.5, zz: 48, xx: 72, ty: 80.8, zh: 471.1 },
+            "黄婉婷": { yw: 66.3, sx: 81.7, yy: 74, zz: 83.3, xx: 78, ty: 83, zh: 580 },
+            "黄芷颍": { yw: 70, sx: 66.3, yy: 75.2, zz: 71.3, xx: 79, ty: 85.8, zh: 554.4 },
+            "江利彬": { yw: 43.3, sx: 41.7, yy: 45, zz: 36, xx: 82, ty: 84, zh: 398.1 },
+            "李珊": { yw: 60, sx: 64, yy: 60.5, zz: 54, xx: 63, ty: 99, zh: 492.8 },
+            "林绍彤": { yw: 53.7, sx: 16, yy: 29.5, zz: 40, xx: 67.5, ty: 59.8, zh: 311.5 },
+            "林智玲": { yw: 75, sx: 73, yy: 88.3, zz: 84, xx: 78, ty: 89.5, zh: 607.8 },
+            "刘芳冰": { yw: 69, sx: 57, yy: 83, zz: 78, xx: 76, ty: 88, zh: 562.8 },
+            "刘俊豪": { yw: 68.7, sx: 54.3, yy: 53.7, zz: 43.7, xx: 75.5, ty: 81.8, zh: 469.8 },
+            "刘诗婷": { yw: 76.3, sx: 72.3, yy: 84.8, zz: 63.7, xx: 80, ty: 81.5, zh: 568.5 },
+            "倪晗曦": { yw: 43.7, sx: 34.3, yy: 49.8, zz: 45, xx: 76.5, ty: 78.3, zh: 379.6 },
+            "石航": { yw: 68, sx: 62.7, yy: 79.5, zz: 45, xx: 67.5, ty: 80.5, zh: 503.8 },
+            "苏铃艳": { yw: 68.7, sx: 33, yy: 89.3, zz: 60, xx: 77.5, ty: 81.8, zh: 516.8 },
+            "王静怡": { yw: 69.7, sx: 86, yy: 69.8, zz: 88, xx: 84.5, ty: 88.5, zh: 605 },
+            "王梦琪": { yw: 70.3, sx: 53, yy: 78.3, zz: 75, xx: 75.5, ty: 80.8, zh: 546.4 },
+            "王琴纹": { yw: 60.3, sx: 82.7, yy: 63, zz: 49.7, xx: 79, ty: 82.5, zh: 524.1 },
+            "王思璐": { yw: 69, sx: 93, yy: 79.5, zz: 53, xx: 72.5, ty: 89, zh: 576.8 },
+            "王钰滢": { yw: 67, sx: 79.3, yy: 85.7, zz: 72.3, xx: 76.5, ty: 85.5, zh: 591.3 },
+            "吴永杰": { yw: 69.7, sx: 87.3, yy: 78.2, zz: 70.3, xx: 81.5, ty: 90, zh: 597.3 },
+            "许思汝": { yw: 72.3, sx: 52, yy: 69.7, zz: 65.7, xx: 76.5, ty: 88.3, zh: 509.3 },
+            "许煜豪": { yw: 50, sx: 68.3, yy: 80.7, zz: 84, xx: 78.5, ty: 87.5, zh: 572.6 },
+            "颜天旭": { yw: 62, sx: 53.3, yy: 59.3, zz: 46.3, xx: 81, ty: 76.5, zh: 456.3 },
+            "杨冬莲": { yw: 74, sx: 62.7, yy: 83.2, zz: 67.7, xx: 77.5, ty: 89.8, zh: 561.6 },
+            "杨译鹏": { yw: 51, sx: 44.7, yy: 62.2, zz: 31.7, xx: 62, ty: 68.3, zh: 403 },
+            "尤麒源": { yw: 46, sx: 54.3, yy: 70.5, zz: 40.7, xx: 58, ty: 75.5, zh: 462.8 },
+            "于静仪": { yw: 79, sx: 68.7, yy: 70.2, zz: 73.3, xx: 74, ty: 85.5, zh: 562 },
+            "张琪涵": { yw: 68, sx: 67, yy: 81, zz: 77.7, xx: 75, ty: 83.5, zh: 551.6 },
+            "张淑丽": { yw: 56, sx: 35, yy: 49.3, zz: 45, xx: 80, ty: 68.8, zh: 411.4 },
+            "章恩琪": { yw: 62.3, sx: 40.7, yy: 49.5, zz: 50, xx: 74, ty: 71.8, zh: 436.8 },
+            "郑馨潼": { yw: 69.3, sx: 42.3, yy: 61.7, zz: 54.3, xx: 81, ty: 71.8, zh: 471.1 },
+            "周昱杭": { yw: 60.3, sx: 68.7, yy: 76.3, zz: 65.7, xx: 85.5, ty: 87, zh: 550.4 },
+            "庄江森": { yw: 53.7, sx: 25.3, yy: 48.5, zz: 37.3, xx: 16, ty: 73, zh: 298.6 },
+            "王紫鑫": { yw: 60.3, sx: 40.3, yy: 74.5, zz: 60.7, xx: 75, ty: 84.5, zh: 495.8 },
+            "钟舒航": { yw: 63, sx: 78, yy: 72.5, zz: 56.3, xx: 74.5, ty: 79, zh: 542.4 },
+            "洪思鑫": { yw: 59.7, sx: 17.7, yy: 27.5, zz: 35.7, xx: 60, ty: 70.5, zh: 319.3 },
+            "石储宁": { yw: 57, sx: 40, yy: 59, zz: 0, xx: 0, ty: 0 }
+        };
+
+        const seatRows = [
+            [{n:"陈子桢",i:35}, {n:"陈俊兴",i:28}, {n:"刘俊豪",i:34}, {n:"杨译鹏",i:38}, {n:"陈涛",i:36}, {n:"洪思鑫",i:48}, {n:"陈毅斌",i:41}],
+            [{n:"陈海林",i:30}, {n:"周昱杭",i:37}, {n:"许思汝",i:6}, {n:"林智玲",i:10}, {n:"江利彬",i:39}, {n:"庄江森",i:16}, {n:"石储宁",i:26}],
+            [{n:"董泽坤",i:27}, {n:"颜天旭",i:32}, {n:"刘芳冰",i:4}, {n:"王静怡",i:5}, {n:"林绍彤",i:7}, {n:"陈姝涵",i:17}, {n:"石航",i:40}],
+            [{n:"陈晓婷",i:15,suspended:true}, {n:"倪晗曦",i:45}, {n:"章恩琪",i:12}, {n:"黄芷颍",i:14}, {n:"郑馨潼",i:1}, {n:"张淑丽",i:23}, {n:"许煜豪",i:29}],
+            [{n:"王琴纹",i:2}, {n:"陈诗钰",i:3}, {n:"张琪涵",i:25}, {n:"蔡晓凤",i:24}, {n:"苏铃艳",i:8}, {n:"杨冬莲",i:11}, {n:"钟舒航",i:47}],
+            [{n:"尤麒源",i:22}, {n:"吴永杰",i:31}, {n:"于静仪",i:33}, {n:"曾雪凌",i:13}, {n:"王梦琪",i:9}, {n:"曾如萍",i:18}, {n:"王紫鑫",i:46}],
+            [{n:"王钰滢",i:42}, {n:"李珊",i:44}, {n:"王思璐",i:43}, {n:"陈诗琪",i:19}, {n:"黄婉婷",i:20}, {n:"刘诗婷",i:21}, null]
+        ];
+
+        const subjects = [
+            {k:'general_check', t:'全员检查', sk: null}, 
+            {k:'chinese', t:'语文', sk:'yw'},
+            {k:'math', t:'数学', sk:'sx'},
+            {k:'english', t:'英语', sk:'yy'},
+            {k:'politics', t:'政治', sk:'zz'},
+            {k:'info', t:'信息', sk:'xx'},
+            {k:'general', t:'通用', sk:'ty'}
+        ];
+
+        let state = {
+            date: '',
+            selectedSubjects: [], 
+            records: {}, 
+            notes: {},
+            isLocked: true,
+            editingId: null
+        };
+        
+        let editingStudent = null;
+        let tempDetailStates = {}; 
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const now = new Date();
+            const year = now.getFullYear();
+            const month = String(now.getMonth() + 1).padStart(2, '0');
+            const day = String(now.getDate()).padStart(2, '0');
+            state.date = `${year}-${month}-${day}`;
+            
+            state.selectedSubjects = ['general_check']; 
+            
+            initSubjects();
+            renderGrid();
+            
+            const dp = document.getElementById('date-picker');
+            dp.value = state.date;
+            dp.onchange = (e) => { state.date = e.target.value; loadData(); };
+            
+            loadData();
+            updateLockUI();
+        });
+
+        // === 2. 核心逻辑 ===
+        function initSubjects() {
+            const el = document.getElementById('subject-container');
+            el.innerHTML = '';
+            subjects.forEach(s => {
+                const btn = document.createElement('div');
+                btn.className = `sub-pill ${state.selectedSubjects.includes(s.k) ? 'active' : ''}`;
+                if(s.k === 'general_check') btn.classList.add('all-btn');
+                btn.innerText = s.t;
+                btn.dataset.key = s.k;
+                btn.onclick = () => toggleSubject(s.k);
+                el.appendChild(btn);
+            });
+        }
+
+        function toggleSubject(key) {
+            if (state.selectedSubjects.includes(key)) {
+                if (state.selectedSubjects.length > 1) {
+                    state.selectedSubjects = state.selectedSubjects.filter(k => k !== key);
+                }
+            } else {
+                state.selectedSubjects.push(key);
+            }
+            refreshSubjectButtons();
+            loadData();
+        }
+
+        function refreshSubjectButtons() {
+            document.querySelectorAll('.sub-pill').forEach(btn => {
+                const k = btn.dataset.key;
+                if (state.selectedSubjects.includes(k)) btn.classList.add('active');
+                else btn.classList.remove('active');
+            });
+        }
+
+        function renderGrid() {
+            const grid = document.getElementById('grid');
+            grid.innerHTML = '';
+            seatRows.forEach(row => {
+                row.forEach(s => {
+                    if (!s) { grid.appendChild(document.createElement('div')); return; }
+                    const card = document.createElement('div');
+                    card.className = `card ${s.suspended ? 'suspended' : ''}`;
+                    card.dataset.name = s.n;
+                    card.innerHTML = `<div class="c-name">${s.n}</div><div class="c-no">${s.i}</div>`;
+                    if (!s.suspended) attachEvents(card, s.n);
+                    grid.appendChild(card);
+                });
+            });
+        }
+
+        function attachEvents(element, name) {
+            let timer; let isLongPress = false; let isScrolling = false;
+            const start = () => {
+                isScrolling = false; isLongPress = false;
+                timer = setTimeout(() => {
+                    if (!isScrolling && !state.isLocked) {
+                        isLongPress = true; openDetailModal(name);
+                    }
+                }, 600);
+            };
+            const move = () => { isScrolling = true; clearTimeout(timer); };
+            const end = (e) => {
+                clearTimeout(timer);
+                if (!isLongPress && !isScrolling) {
+                    if (state.isLocked) showToast("🔒 请先解锁");
+                    else quickToggleStudent(name);
+                }
+            };
+            element.addEventListener('touchstart', start);
+            element.addEventListener('touchmove', move);
+            element.addEventListener('touchend', (e) => { if(e.cancelable) e.preventDefault(); end(e); });
+            element.addEventListener('mousedown', start);
+            element.addEventListener('mouseup', end);
+        }
+
+        function quickToggleStudent(name) {
+            if (!state.records[name]) state.records[name] = {};
+            const stuRec = state.records[name];
+            
+            const activeSubs = state.selectedSubjects.filter(subKey => {
+                if (subKey === 'general_check') return true;
+                const subObj = subjects.find(s=>s.k===subKey);
+                const score = (scoreData[name] && scoreData[name][subObj.sk]) || 0;
+                return score <= 70;
+            });
+
+            if (activeSubs.length === 0) {
+                showToast('该生所选科目均为免检');
+                return;
+            }
+
+            const currentStatus = stuRec[activeSubs[0]] || 'unchecked';
+            const flow = { 
+                'unchecked': 'finished', 
+                'finished': 'unfinished', 
+                'unfinished': 'making_up', 
+                'making_up': 'unchecked'
+            };
+            const nextStatus = flow[currentStatus];
+
+            activeSubs.forEach(sub => {
+                stuRec[sub] = nextStatus;
+            });
+
+            updateCardVisual(name);
+            updateStats();
+            saveData(false);
+        }
+
+        function updateCardVisual(name) {
+            const card = document.querySelector(`.card[data-name="${name}"]`);
+            if (!card) return;
+            const stuRec = state.records[name] || {};
+            
+            let hasNonExempt = false;
+            let isAllExempt = true;
+
+            state.selectedSubjects.forEach(subKey => {
+                if (subKey === 'general_check') {
+                    hasNonExempt = true; isAllExempt = false;
+                } else {
+                    const subObj = subjects.find(s=>s.k===subKey);
+                    const score = (scoreData[name] && scoreData[name][subObj.sk]) || 0;
+                    if (score <= 70) {
+                        hasNonExempt = true;
+                        isAllExempt = false;
+                    }
+                }
+            });
+
+            let hasMakingUp = false;
+            let hasUnfinished = false;
+            let hasFinished = false;
+            let hasUnchecked = false;
+
+            if (hasNonExempt) {
+                state.selectedSubjects.forEach(sub => {
+                    let shouldCheck = false;
+                    if (sub === 'general_check') shouldCheck = true;
+                    else {
+                        const subObj = subjects.find(s=>s.k===sub);
+                        const score = (scoreData[name] && scoreData[name][subObj.sk]) || 0;
+                        if(score <= 70) shouldCheck = true;
+                    }
+
+                    if (shouldCheck) {
+                        const status = stuRec[sub] || 'unchecked';
+                        if (status === 'making_up') hasMakingUp = true;
+                        if (status === 'unfinished') hasUnfinished = true;
+                        if (status === 'finished') hasFinished = true;
+                        if (status === 'unchecked') hasUnchecked = true;
+                    }
+                });
+            }
+
+            card.className = 'card';
+            if (isAllExempt && state.selectedSubjects.length > 0) card.classList.add('fully-exempt');
+            else if (hasMakingUp) card.classList.add('making-up'); 
+            else if (hasUnfinished) card.classList.add('unfinished'); 
+            else if (hasFinished && !hasUnchecked) card.classList.add('finished'); 
+            else card.classList.add('unchecked'); 
+            
+            if (state.notes[name]) card.classList.add('has-note');
+        }
+
+        function updateStats() {
+            let f=0, u=0, m=0, uc=0, e=0;
+            Object.keys(scoreData).forEach(name => {
+                if (name === "陈晓婷") return;
+                const card = document.querySelector(`.card[data-name="${name}"]`);
+                if(card) {
+                    if (card.classList.contains('fully-exempt')) e++;
+                    else if (card.classList.contains('making-up')) m++;
+                    else if (card.classList.contains('unfinished')) u++;
+                    else if (card.classList.contains('finished')) f++;
+                    else uc++;
+                }
+            });
+            document.getElementById('cnt-fin').innerText = f;
+            document.getElementById('cnt-unfin').innerText = u;
+            document.getElementById('cnt-make').innerText = m;
+            document.getElementById('cnt-unch').innerText = uc;
+        }
+
+        // === 4. 美化后的详情弹窗 ===
+        function openDetailModal(name) {
+            editingStudent = name;
+            tempDetailStates = { ...(state.records[name] || {}) };
+            
+            document.getElementById('dm-name').innerText = name;
+            document.getElementById('dm-note').value = state.notes[name] || '';
+            
+            renderSubjectList(name);
+            renderScorePanel(name);
+            document.getElementById('detail-modal').style.display = 'flex';
+        }
+
+        function renderScorePanel(name) {
+            const container = document.getElementById('score-display');
+            const s = scoreData[name];
+            if (!s) { container.innerHTML = ''; return; }
+
+            const getScoreHtml = (label, val) => {
+                const num = parseFloat(val);
+                let colorClass = 'pass';
+                if (!isNaN(num) && num <= 70) colorClass = 'fail'; 
+                return `<div class="score-item"><div class="sc-label">${label}</div><div class="sc-val ${colorClass}">${val}</div></div>`;
+            };
+
+            container.innerHTML = `
+                <div class="score-title">月考成绩仪表盘</div>
+                <div class="score-grid">
+                    ${getScoreHtml('语文', s.yw)}
+                    ${getScoreHtml('数学', s.sx)}
+                    ${getScoreHtml('英语', s.yy)}
+                    ${getScoreHtml('政治', s.zz)}
+                    ${getScoreHtml('信息', s.xx)}
+                    ${getScoreHtml('通用', s.ty)}
+                </div>
+                <div class="score-total">
+                    <span style="font-size:0.85rem; color:#f1f5f9;">综合换算总分</span>
+                    <span class="sc-val" style="color:#facc15">${s.zh}</span>
+                </div>
+            `;
+        }
+
+        function renderSubjectList(name) {
+            const container = document.getElementById('subject-list-container');
+            container.innerHTML = '';
+            
+            state.selectedSubjects.forEach(subKey => {
+                const subObj = subjects.find(s=>s.k===subKey);
+                let scoreText = '';
+                let isExempt = false;
+
+                if (subKey === 'general_check') {
+                    scoreText = '<span style="color:#f59e0b">全员检查</span>';
+                } else {
+                    const score = (scoreData[name] && scoreData[name][subObj.sk]) || 0;
+                    isExempt = score > 70;
+                    scoreText = `<span style="font-size:0.8rem; color:${isExempt?'#34d399':'#ef4444'}">分: ${score}</span>`;
+                }
+                
+                const row = document.createElement('div');
+                row.className = 'sub-row';
+                
+                let ctrlHtml = '';
+                if (isExempt) {
+                    ctrlHtml = `<div class="exempt-badge">免检</div>`;
+                } else {
+                    const currSt = tempDetailStates[subKey] || 'unchecked';
+                    ctrlHtml = `
+                        <div class="sub-ctrl">
+                            <button class="ctrl-btn ${currSt==='finished'?'active finished':''}" onclick="setSubStatus('${subKey}', 'finished')">完</button>
+                            <button class="ctrl-btn ${currSt==='unfinished'?'active unfinished':''}" onclick="setSubStatus('${subKey}', 'unfinished')">缺</button>
+                            <button class="ctrl-btn ${currSt==='making_up'?'active making_up':''}" onclick="setSubStatus('${subKey}', 'making_up')">补</button>
+                            <button class="ctrl-btn ${currSt==='unchecked'?'active unchecked':''}" onclick="setSubStatus('${subKey}', 'unchecked')">未</button>
+                        </div>
+                    `;
+                }
+
+                row.innerHTML = `
+                    <div class="sub-info">
+                        <span class="sub-name">${subObj.t}</span>
+                        ${scoreText}
+                    </div>
+                    ${ctrlHtml}
+                `;
+                container.appendChild(row);
+            });
+        }
+
+        window.setSubStatus = function(subKey, status) {
+            tempDetailStates[subKey] = status;
+            renderSubjectList(editingStudent); 
+        }
+
+        function saveDetail() {
+            if (editingStudent) {
+                state.records[editingStudent] = { ...state.records[editingStudent], ...tempDetailStates };
+                const note = document.getElementById('dm-note').value;
+                if(note && note.trim()) state.notes[editingStudent] = note.trim();
+                else delete state.notes[editingStudent];
+                updateCardVisual(editingStudent);
+                updateStats();
+                saveData(false);
+            }
+            closeModal('detail-modal');
+        }
+
+        // === 5. Excel 导出 (逻辑重构) ===
+        function openExportModal() {
+            closeModal('menu-modal');
+            document.getElementById('export-start-date').value = state.date;
+            document.getElementById('export-end-date').value = state.date;
+            document.getElementById('export-modal').style.display = 'flex';
+        }
+
+        function doExport() {
+            const startDate = document.getElementById('export-start-date').value;
+            const endDate = document.getElementById('export-end-date').value;
+            if(!startDate || !endDate) return;
+            
+            const all = JSON.parse(localStorage.getItem(getKey()) || '[]');
+            const filtered = all.filter(r => r.date >= startDate && r.date <= endDate);
+            
+            if(filtered.length === 0) { showToast('该时段无数据'); return; }
+            filtered.sort((a,b) => a.date.localeCompare(b.date));
+
+            let data = [];
+            filtered.forEach(r => {
+                let checkedKeys = new Set();
+                Object.values(r.records).forEach(stuRec => {
+                    Object.keys(stuRec).forEach(k => checkedKeys.add(k));
+                });
+                let activeSubObjs = [];
+                checkedKeys.forEach(k => {
+                    const s = subjects.find(sub => sub.k === k);
+                    if(s) activeSubObjs.push(s);
+                });
+                activeSubObjs.sort((a,b) => {
+                    if(a.k === 'general_check') return -1;
+                    if(b.k === 'general_check') return 1;
+                    return subjects.indexOf(a) - subjects.indexOf(b);
+                });
+
+                Object.keys(scoreData).forEach(name => {
+                    if (name === "陈晓婷") return;
+                    let row = { "日期": r.date, "姓名": name };
+                    let remarksList = []; // 只收集问题的备注
+                    
+                    activeSubObjs.forEach(sub => {
+                        const st = (r.records[name] && r.records[name][sub.k]) || 'unchecked';
+                        let stTxt = '';
+                        
+                        if (sub.k === 'general_check') {
+                            if(st==='finished') stTxt='已完成';
+                            else if(st==='unfinished') { stTxt='未完成'; remarksList.push("全检未完"); }
+                            else if(st==='making_up') { stTxt='正在补'; remarksList.push("全检补交"); }
+                            else if(st==='unchecked') { stTxt='未检查'; remarksList.push("全检未查"); }
+                            row["全员检查"] = stTxt;
+                        } else {
+                            const score = scoreData[name][sub.sk];
+                            row[sub.t + "分数"] = score;
+                            
+                            if (score > 70) {
+                                stTxt = "免检";
+                            } else {
+                                if(st==='finished') stTxt='已完成';
+                                else if(st==='unfinished') { stTxt='未完成'; remarksList.push(sub.t + "未完"); }
+                                else if(st==='making_up') { stTxt='正在补'; remarksList.push(sub.t + "补"); }
+                                else if(st==='unchecked') { stTxt='未检查'; remarksList.push(sub.t + "未查"); }
+                            }
+                            row[sub.t + "状态"] = stTxt;
+                        }
+                    });
+
+                    row["作业内容"] = r.content || '';
+                    
+                    // 备注逻辑：手动备注 + 自动生成的问题备注
+                    let manualNote = r.notes[name] || '';
+                    let autoNote = remarksList.join('，');
+                    let finalNote = manualNote;
+                    if(autoNote) finalNote = finalNote ? `${finalNote} (${autoNote})` : autoNote;
+                    
+                    row["备注"] = finalNote;
+                    data.push(row);
+                });
+            });
+
+            const wb = XLSX.utils.book_new();
+            const ws = XLSX.utils.json_to_sheet(data);
+            
+            const wscols = [{wch:12}, {wch:8}]; 
+            for(let i=0; i<20; i++) wscols.push({wch:10}); 
+            wscols.push({wch:20}); wscols.push({wch:40}); 
+            ws['!cols'] = wscols;
+
+            XLSX.utils.book_append_sheet(wb, ws, "检查记录");
+            XLSX.writeFile(wb, `作业检查_${startDate}_至_${endDate}.xlsx`);
+            closeModal('export-modal');
+            showToast('已导出');
+        }
+
+        // === 6. 基础函数 ===
+        function getKey() { return 'hx_check_data_v20'; }
+
+        function saveData(showToastMsg = true) {
+            let all = JSON.parse(localStorage.getItem(getKey()) || '[]');
+            if (state.editingId) {
+                all = all.filter(r => r.ts !== state.editingId);
+            } else {
+                all = all.filter(r => r.date !== state.date);
+            }
+            const newRecord = {
+                date: state.date, 
+                content: document.getElementById('hw-content').value,
+                records: state.records, 
+                notes: state.notes, 
+                ts: state.editingId || Date.now() 
+            };
+            all.push(newRecord);
+            localStorage.setItem(getKey(), JSON.stringify(all));
+            if (showToastMsg) showToast('已保存');
+        }
+
+        function loadData() {
+            const all = JSON.parse(localStorage.getItem(getKey()) || '[]');
+            let entry = null;
+            if (state.editingId) entry = all.find(r => r.ts === state.editingId);
+            if (!entry) entry = all.find(r => r.date === state.date); 
+
+            if (!entry) {
+                 state.records = {}; state.notes = {};
+                 document.getElementById('hw-content').value = '';
+                 if (!state.editingId) state.editingId = null; 
+            } else {
+                state.records = entry.records || {};
+                state.notes = entry.notes || {};
+                document.getElementById('hw-content').value = entry.content || '';
+            }
+            Object.keys(scoreData).forEach(n => updateCardVisual(n));
+            updateStats();
+        }
+
+        function toggleLock() {
+            state.isLocked = !state.isLocked;
+            updateLockUI();
+            document.getElementById('grid').classList.toggle('grid-locked', state.isLocked);
+            showToast(state.isLocked ? "已锁定" : "已解锁");
+        }
+        function updateLockUI() {
+            const btn = document.getElementById('btn-lock');
+            const badge = document.getElementById('status-badge');
+            if(state.isLocked) {
+                btn.classList.remove('unlocked'); btn.innerHTML='🔒';
+                badge.className='mode-badge locked'; badge.innerText='🔒 已锁定';
+            } else {
+                btn.classList.add('unlocked'); btn.innerHTML='🔓';
+                badge.className='mode-badge editing'; badge.innerText='🔓 编辑模式';
+            }
+        }
+        function updateHeaderStatus(isHistory) {
+            const badge = document.getElementById('status-badge');
+            if(isHistory) { badge.className='mode-badge history'; badge.innerText='📝 修改历史'; }
+            else updateLockUI();
+        }
+        function openMenu() { document.getElementById('menu-modal').style.display = 'flex'; }
+        function closeModal(id) { document.getElementById(id).style.display = 'none'; }
+        
+        function batchSet(st) {
+            if(state.isLocked) { showToast("请先解锁"); return; }
+            Object.keys(scoreData).forEach(name => {
+                if(name==="陈晓婷") return;
+                // 免检判断
+                let isExempt = false;
+                const subObj = subjects.find(s=>s.k===state.subject);
+                if (subObj && subObj.sk && scoreData[name][subObj.sk] > 70) isExempt = true;
+                
+                if (!isExempt) {
+                    if(!state.records[name]) state.records[name] = {};
+                    state.records[name][state.subject] = st;
+                    updateCardVisual(name);
+                }
+            });
+            updateStats();
+            saveData(false);
+            closeModal('menu-modal');
+            showToast('批量操作完成');
+        }
+
+        function openHistory() {
+            closeModal('menu-modal');
+            const list = document.getElementById('history-list');
+            list.innerHTML = '';
+            const all = JSON.parse(localStorage.getItem(getKey()) || '[]').sort((a,b) => b.ts - a.ts);
+            if(all.length===0) list.innerHTML = '<div style="text-align:center;color:#666;padding:20px;">无记录</div>';
+            all.forEach(item => {
+                const div = document.createElement('div');
+                div.className = 'h-item';
+                div.innerHTML = `<div class="h-info" onclick='loadHistoryItem(${item.ts})'>
+                    <div style="font-weight:bold; color:white;">${item.date} <span style="font-size:0.8rem;color:#f59e0b;">[修改]</span></div>
+                    <div style="font-size:0.8rem; color:#94a3b8;">${item.content || '无内容'}</div>
+                </div>
+                <div class="h-del-btn" onclick="deleteRecord(${item.ts})">🗑</div>`;
+                list.appendChild(div);
+            });
+            document.getElementById('history-modal').style.display = 'flex';
+        }
+        function loadHistoryItem(ts) {
+            state.editingId = ts;
+            loadData();
+            document.getElementById('date-picker').value = state.date;
+            updateHeaderStatus(true);
+            closeModal('history-modal');
+            showToast('已载入历史');
+        }
+        function deleteRecord(ts) {
+            if(!confirm("确定删除？")) return;
+            let all = JSON.parse(localStorage.getItem(getKey()) || '[]');
+            all = all.filter(r => r.ts !== ts);
+            localStorage.setItem(getKey(), JSON.stringify(all));
+            openHistory();
+            showToast('已删除');
+        }
+        function showToast(msg) {
+            const t = document.getElementById('toast');
+            t.innerText = msg; t.style.display = 'block';
+            setTimeout(() => t.style.display = 'none', 1500);
+        }
+    </script>
+</body>
+</html>

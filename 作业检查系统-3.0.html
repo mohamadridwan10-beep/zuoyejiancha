@@ -1,0 +1,865 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>集贤作业 V11</title>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <style>
+        :root {
+            --bg-dark: #0f172a;
+            --card-bg: #1e293b;
+            --text-main: #f1f5f9;
+            --text-sub: #94a3b8;
+            --primary: #3b82f6;
+            
+            --c-finish: #10b981;  /* 绿 */
+            --c-unfin: #ef4444;   /* 红 */
+            --c-late: #f59e0b;    /* 黄 */
+            --c-unchecked: #8b5cf6; /* 紫 */
+            --c-note: #3b82f6;    /* 蓝 */
+            --c-lock: #ef4444;    
+            --c-unlock: #10b981;
+            --c-score-bg: #0b1120; 
+
+            --shadow-card: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+        
+        body { 
+            background: var(--bg-dark); 
+            color: var(--text-main);
+            padding-bottom: 120px; 
+            overflow-x: hidden;
+            user-select: none;
+        }
+
+        /* --- Header --- */
+        .header {
+            background: rgba(15, 23, 42, 0.95);
+            backdrop-filter: blur(12px);
+            padding: 12px 16px;
+            position: sticky; top: 0; z-index: 50;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+            display: flex; justify-content: space-between; align-items: center;
+        }
+        .header-title { font-size: 1.1rem; font-weight: 800; background: linear-gradient(90deg, #60a5fa, #a78bfa); -webkit-background-clip: text; color: transparent; }
+        .mode-badge { font-size: 0.75rem; padding: 4px 8px; border-radius: 4px; background: #334155; color: #aaa; transition: all 0.3s; }
+        .mode-badge.editing { background: var(--c-unlock); color: #000; font-weight: bold; }
+        .mode-badge.locked { background: var(--c-lock); color: white; font-weight: bold; }
+        .mode-badge.history { background: #f59e0b; color: black; font-weight: bold; }
+
+        /* --- Controls --- */
+        .controls { padding: 15px; background: linear-gradient(180deg, rgba(15,23,42,0) 0%, rgba(15,23,42,0.5) 100%); }
+        .input-group { margin-bottom: 15px; display: flex; flex-direction: column; gap: 10px; }
+        
+        input[type="date"], .task-input {
+            background: var(--card-bg); border: 1px solid #334155; color: white;
+            padding: 12px; border-radius: 8px; font-size: 1rem; outline: none; width: 100%;
+            transition: border-color 0.3s;
+        }
+        .task-input:focus { border-color: var(--primary); }
+
+        /* Subject Scroll */
+        .subject-bar { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 5px; scrollbar-width: none; }
+        .sub-pill {
+            white-space: nowrap; padding: 8px 18px; border-radius: 20px;
+            background: rgba(255,255,255,0.05); color: var(--text-sub);
+            font-size: 0.9rem; border: 1px solid transparent; transition: all 0.2s;
+        }
+        .sub-pill.active {
+            background: rgba(59, 130, 246, 0.2); color: #60a5fa; border-color: #60a5fa;
+            box-shadow: 0 0 10px rgba(59, 130, 246, 0.2);
+            font-weight: bold;
+        }
+
+        /* --- Grid --- */
+        .classroom-scroll { width: 100%; overflow-x: auto; padding: 0 15px 20px 15px; }
+        .grid-layout {
+            display: grid; grid-template-columns: repeat(7, minmax(72px, 1fr)); gap: 8px; min-width: 540px;
+        }
+
+        .card {
+            background: var(--card-bg); height: 75px; border-radius: 10px;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            position: relative; border: 1px solid rgba(255,255,255,0.02);
+            box-shadow: var(--shadow-card); transition: transform 0.1s;
+        }
+        .card:active { transform: scale(0.96); }
+        .grid-locked .card { opacity: 0.9; }
+        .grid-locked .card:active { transform: none; }
+
+        .c-name { font-size: 0.95rem; font-weight: 600; z-index: 2; text-align: center; }
+        .c-no { font-size: 0.7rem; color: #64748b; margin-top: 2px; }
+
+        .card.finished { background: rgba(16, 185, 129, 0.15); border: 1px solid var(--c-finish); }
+        .card.finished .c-name { color: var(--c-finish); }
+        .card.unfinished { background: rgba(239, 68, 68, 0.15); border: 1px solid var(--c-unfin); }
+        .card.unfinished .c-name { color: var(--c-unfin); }
+        .card.late { background: rgba(245, 158, 11, 0.15); border: 1px solid var(--c-late); }
+        .card.late .c-name { color: var(--c-late); }
+        .card.late::after { content: '补'; position: absolute; top:2px; right:4px; font-size:0.65rem; color:var(--c-late); }
+        .card.unchecked { background: rgba(139, 92, 246, 0.15); border: 1px solid var(--c-unchecked); }
+        .card.unchecked .c-name { color: var(--c-unchecked); }
+        .card.unchecked::after { content: '未检'; position: absolute; top:2px; right:4px; font-size:0.65rem; color:var(--c-unchecked); }
+
+        .card.has-note::before {
+            content: ''; position: absolute; top: 6px; left: 6px;
+            width: 8px; height: 8px; border-radius: 50%; background: var(--c-note);
+            box-shadow: 0 0 5px var(--c-note);
+        }
+
+        .card.suspended {
+            background: repeating-linear-gradient(45deg, #1e293b, #1e293b 10px, #0f172a 10px, #0f172a 20px);
+            opacity: 0.5; pointer-events: none;
+        }
+        .card.suspended .c-name { text-decoration: line-through; color:#666; }
+
+        .podium { text-align: center; color: #475569; font-size: 0.8rem; margin: 15px auto; width: 200px; border-top: 2px solid #334155; padding-top: 5px; }
+
+        /* --- Bottom Bar --- */
+        .bottom-bar {
+            position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+            width: 95%; max-width: 600px;
+            background: rgba(30, 41, 59, 0.95); backdrop-filter: blur(15px);
+            border: 1px solid rgba(255,255,255,0.1); border-radius: 50px;
+            padding: 8px 12px;
+            display: flex; justify-content: space-between; align-items: center;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.6); z-index: 100;
+        }
+        
+        .stat-box { display: flex; gap: 8px; font-size: 0.75rem; font-weight: 700; align-items: center; }
+        .stat-item { display:flex; align-items:center; }
+        .stat-num { font-size: 0.9rem; margin-left: 1px; }
+
+        .action-group { display: flex; gap: 8px; align-items: center; }
+        .btn-circle {
+            width: 38px; height: 38px; border-radius: 50%; border: none;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 1.1rem; cursor: pointer; color: white;
+            transition: all 0.2s;
+        }
+        .btn-menu { background: #475569; }
+        .btn-lock { background: var(--c-lock); box-shadow: 0 0 10px rgba(239, 68, 68, 0.4); }
+        .btn-lock.unlocked { background: var(--c-unlock); box-shadow: 0 0 10px rgba(16, 185, 129, 0.4); }
+        .btn-save { background: linear-gradient(135deg, #3b82f6, #2563eb); }
+
+        /* --- Modals --- */
+        .modal-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.85); z-index: 200; display: none;
+            backdrop-filter: blur(4px); align-items: center; justify-content: center;
+        }
+        .modal-card {
+            background: #1e293b; width: 90%; max-width: 380px; max-height: 85vh;
+            border-radius: 16px; padding: 20px; border: 1px solid rgba(255,255,255,0.1);
+            animation: popIn 0.2s; display: flex; flex-direction: column; overflow-y: auto;
+        }
+        @keyframes popIn { from { transform: scale(0.9); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+
+        .modal-title { font-size: 1.1rem; font-weight: bold; margin-bottom: 10px; color: white; text-align: center; }
+        .modal-btn { width: 100%; padding: 12px; border-radius: 8px; border:none; color: white; font-weight: bold; margin-top: 10px; cursor: pointer; }
+        
+        /* 导出日期选择器 */
+        .date-range-group {
+            display: flex; flex-direction: column; gap: 10px; margin: 15px 0;
+        }
+        .date-label { color: var(--text-sub); font-size: 0.9rem; margin-bottom: 5px; }
+
+        .score-panel {
+            background: var(--c-score-bg);
+            border: 1px solid #334155; border-radius: 8px;
+            padding: 12px; margin-bottom: 15px;
+        }
+        .score-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+        .score-item { text-align: center; background: rgba(255,255,255,0.03); padding: 8px 4px; border-radius: 4px; }
+        .sc-label { font-size: 0.75rem; color: var(--text-sub); }
+        .sc-val { font-size: 1rem; font-weight: bold; color: #a78bfa; margin-top: 2px; }
+        .sc-val.total { color: #facc15; font-size: 1.1rem; }
+        .sc-val.fail { color: #ef4444; } 
+
+        .history-list { max-height: 50vh; overflow-y: auto; }
+        .h-item { 
+            padding: 12px; border-bottom: 1px solid rgba(255,255,255,0.05); 
+            display: flex; justify-content: space-between; align-items: center;
+        }
+        .h-info { flex: 1; cursor: pointer; }
+        .h-del-btn {
+            background: rgba(239, 68, 68, 0.2); color: #ef4444; border: 1px solid #ef4444;
+            width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center;
+            margin-left: 10px; cursor: pointer;
+        }
+
+        .status-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 15px; }
+        .st-btn { padding: 10px; border-radius: 8px; background: rgba(255,255,255,0.05); color: #ccc; text-align: center; border: 1px solid transparent; transition: all 0.2s; font-size: 0.9rem;}
+        .st-btn.active { border-color: white; background: rgba(255,255,255,0.1); font-weight: bold; }
+        textarea.note-area { width: 100%; height: 80px; background: rgba(0,0,0,0.3); border: 1px solid #334155; border-radius: 8px; color: white; padding: 10px; margin-bottom: 5px; resize: none; font-size: 1rem; }
+
+        .toast {
+            position: fixed; top: 40%; left: 50%; transform: translateX(-50%);
+            background: rgba(0,0,0,0.9); color: white; padding: 12px 24px;
+            border-radius: 30px; z-index: 300; display: none; font-size: 0.9rem; pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <div>
+            <span class="header-title">集贤作业 V11</span>
+        </div>
+        <div id="status-badge" class="mode-badge locked">🔒 已锁定</div>
+    </div>
+
+    <div class="controls">
+        <div class="input-group">
+            <input type="date" id="date-picker">
+            <input type="text" id="hw-content" class="task-input" placeholder="输入作业内容...">
+        </div>
+        <div class="subject-bar" id="subject-container"></div>
+    </div>
+
+    <div class="classroom-scroll">
+        <div class="grid-layout grid-locked" id="grid"></div>
+        <div class="podium">讲 台 (解锁后操作)</div>
+    </div>
+
+    <div class="bottom-bar">
+        <div class="stat-box">
+            <div class="stat-item" style="color:var(--c-finish)">✔<span id="cnt-fin" class="stat-num">0</span></div>
+            <div class="stat-item" style="color:var(--c-unfin)">✖<span id="cnt-unfin" class="stat-num">0</span></div>
+            <div class="stat-item" style="color:var(--c-late)">补<span id="cnt-late" class="stat-num">0</span></div>
+            <div class="stat-item" style="color:var(--c-unchecked)">未<span id="cnt-unch" class="stat-num">0</span></div>
+        </div>
+        <div class="action-group">
+            <button class="btn-circle btn-lock" id="btn-lock" onclick="toggleLock()">🔒</button>
+            <button class="btn-circle btn-menu" onclick="openMenu()">☰</button>
+            <button class="btn-circle btn-save" onclick="saveData(true)">💾</button>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="detail-modal">
+        <div class="modal-card">
+            <div class="modal-title"><span id="dm-name"></span></div>
+            <div class="score-panel" id="score-display"></div>
+            <div class="status-grid">
+                <div class="st-btn" onclick="setDetailStatus('finished')" style="color:var(--c-finish)">已完成</div>
+                <div class="st-btn" onclick="setDetailStatus('unfinished')" style="color:var(--c-unfin)">未完成</div>
+                <div class="st-btn" onclick="setDetailStatus('late')" style="color:var(--c-late)">补交</div>
+                <div class="st-btn" onclick="setDetailStatus('unchecked')" style="color:var(--c-unchecked)">未检</div>
+                <div class="st-btn" onclick="setDetailStatus('unsubmitted')">重置</div>
+            </div>
+            <textarea id="dm-note" class="note-area" placeholder="在此输入备注..."></textarea>
+            <button class="modal-btn" style="background:#3b82f6;" onclick="saveDetail()">确定 (自动保存)</button>
+            <button class="modal-btn" style="background:transparent; color:#94a3b8; margin-top:0;" onclick="closeModal('detail-modal')">取消</button>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="menu-modal">
+        <div class="modal-card">
+            <div class="modal-title">功能菜单</div>
+            <button class="modal-btn" style="background:#334155;" onclick="openHistory()">📂 历史记录</button>
+            <button class="modal-btn" style="background:#059669;" onclick="openExportModal()">📊 导出 Excel (日期范围)</button>
+            <div style="display:flex; gap:10px; margin-top:10px;">
+                <button class="modal-btn" style="background:rgba(16,185,129,0.2); color:#10b981; margin-top:0;" onclick="batchSet('finished')">全对</button>
+                <button class="modal-btn" style="background:rgba(255,255,255,0.1); color:#ccc; margin-top:0;" onclick="batchSet('unsubmitted')">重置</button>
+            </div>
+            <button class="modal-btn" style="background:transparent; color:#94a3b8;" onclick="closeModal('menu-modal')">关闭</button>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="export-modal">
+        <div class="modal-card">
+            <div class="modal-title">导出选项</div>
+            <div class="date-range-group">
+                <label class="date-label">开始日期:</label>
+                <input type="date" id="export-start-date">
+                <label class="date-label" style="margin-top:10px;">结束日期:</label>
+                <input type="date" id="export-end-date">
+            </div>
+            <button class="modal-btn" style="background:#059669;" onclick="doExport()">开始导出</button>
+            <button class="modal-btn" style="background:transparent; color:#94a3b8;" onclick="closeModal('export-modal')">取消</button>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="history-modal">
+        <div class="modal-card">
+            <div class="modal-title">历史记录</div>
+            <div class="history-list" id="history-list"></div>
+            <button class="modal-btn" style="background:transparent; color:#94a3b8;" onclick="closeModal('history-modal')">关闭</button>
+        </div>
+    </div>
+
+    <div class="toast" id="toast">提示</div>
+
+    <script>
+        // === 1. 完整成绩数据 ===
+        const scoreData = {
+            "蔡晓凤": { yw: 68.7, sx: 68.3, yy: 69.7, zz: 67.3, xx: 79.5, ty: 84.5, zh: 549 },
+            "曾如萍": { yw: 82, sx: 72.7, yy: 83.3, zz: 82.7, xx: 77, ty: 86, zh: 617.3 },
+            "曾雪凌": { yw: 62.3, sx: 76.7, yy: 58, zz: 80, xx: 74.5, ty: 83.5, zh: 523.3 },
+            "陈海林": { yw: 69, sx: 56.7, yy: 48.3, zz: 51.7, xx: 77, ty: 79.5, zh: 474.3 },
+            "陈俊兴": { yw: 59, sx: 83, yy: 69.5, zz: 47, xx: 71.5, ty: 77.5, zh: 508.3 },
+            "陈诗琪": { yw: 76.3, sx: 58.3, yy: 83.5, zz: 66.3, xx: 73.5, ty: 75, zh: 548.6 },
+            "陈诗钰": { yw: 75.7, sx: 57, yy: 78.7, zz: 56.7, xx: 81, ty: 77.8, zh: 533.8 },
+            "陈姝涵": { yw: 68.7, sx: 54, yy: 67.8, zz: 56.3, xx: 74.5, ty: 84.5, zh: 491.6 },
+            "陈涛": { yw: 70.3, sx: 97, yy: 77.3, zz: 83, xx: 96.5, ty: 91, zh: 627.4 },
+            "陈晓婷": { yw: "缺", sx: "缺", yy: "缺", zz: "缺", xx: "缺", ty: "缺", zh: "缺" },
+            "陈毅斌": { yw: 26.7, sx: 19.3, yy: 30.8, zz: 21.3, xx: 24, ty: 54.8, zh: 213.1 },
+            "陈子桢": { yw: 66.7, sx: 60.7, yy: 45.5, zz: 46.3, xx: 67.5, ty: 79, zh: 467.3 },
+            "董泽坤": { yw: 63.7, sx: 61.3, yy: 60.5, zz: 48, xx: 72, ty: 80.8, zh: 471.1 },
+            "黄婉婷": { yw: 66.3, sx: 81.7, yy: 74, zz: 83.3, xx: 78, ty: 83, zh: 580 },
+            "黄芷颍": { yw: 70, sx: 66.3, yy: 75.2, zz: 71.3, xx: 79, ty: 85.8, zh: 554.4 },
+            "江利彬": { yw: 43.3, sx: 41.7, yy: 45, zz: 36, xx: 82, ty: 84, zh: 398.1 },
+            "李珊": { yw: 60, sx: 64, yy: 60.5, zz: 54, xx: 63, ty: 99, zh: 492.8 },
+            "林绍彤": { yw: 53.7, sx: 16, yy: 29.5, zz: 40, xx: 67.5, ty: 59.8, zh: 311.5 },
+            "林智玲": { yw: 75, sx: 73, yy: 88.3, zz: 84, xx: 78, ty: 89.5, zh: 607.8 },
+            "刘芳冰": { yw: 69, sx: 57, yy: 83, zz: 78, xx: 76, ty: 88, zh: 562.8 },
+            "刘俊豪": { yw: 68.7, sx: 54.3, yy: 53.7, zz: 43.7, xx: 75.5, ty: 81.8, zh: 469.8 },
+            "刘诗婷": { yw: 76.3, sx: 72.3, yy: 84.8, zz: 63.7, xx: 80, ty: 81.5, zh: 568.5 },
+            "倪晗曦": { yw: 43.7, sx: 34.3, yy: 49.8, zz: 45, xx: 76.5, ty: 78.3, zh: 379.6 },
+            "石航": { yw: 68, sx: 62.7, yy: 79.5, zz: 45, xx: 67.5, ty: 80.5, zh: 503.8 },
+            "苏铃艳": { yw: 68.7, sx: 33, yy: 89.3, zz: 60, xx: 77.5, ty: 81.8, zh: 516.8 },
+            "王静怡": { yw: 69.7, sx: 86, yy: 69.8, zz: 88, xx: 84.5, ty: 88.5, zh: 605 },
+            "王梦琪": { yw: 70.3, sx: 53, yy: 78.3, zz: 75, xx: 75.5, ty: 80.8, zh: 546.4 },
+            "王琴纹": { yw: 60.3, sx: 82.7, yy: 63, zz: 49.7, xx: 79, ty: 82.5, zh: 524.1 },
+            "王思璐": { yw: 69, sx: 93, yy: 79.5, zz: 53, xx: 72.5, ty: 89, zh: 576.8 },
+            "王钰滢": { yw: 67, sx: 79.3, yy: 85.7, zz: 72.3, xx: 76.5, ty: 85.5, zh: 591.3 },
+            "吴永杰": { yw: 69.7, sx: 87.3, yy: 78.2, zz: 70.3, xx: 81.5, ty: 90, zh: 597.3 },
+            "许思汝": { yw: 72.3, sx: 52, yy: 69.7, zz: 65.7, xx: 76.5, ty: 88.3, zh: 509.3 },
+            "许煜豪": { yw: 50, sx: 68.3, yy: 80.7, zz: 84, xx: 78.5, ty: 87.5, zh: 572.6 },
+            "颜天旭": { yw: 62, sx: 53.3, yy: 59.3, zz: 46.3, xx: 81, ty: 76.5, zh: 456.3 },
+            "杨冬莲": { yw: 74, sx: 62.7, yy: 83.2, zz: 67.7, xx: 77.5, ty: 89.8, zh: 561.6 },
+            "杨译鹏": { yw: 51, sx: 44.7, yy: 62.2, zz: 31.7, xx: 62, ty: 68.3, zh: 403 },
+            "尤麒源": { yw: 46, sx: 54.3, yy: 70.5, zz: 40.7, xx: 58, ty: 75.5, zh: 462.8 },
+            "于静仪": { yw: 79, sx: 68.7, yy: 70.2, zz: 73.3, xx: 74, ty: 85.5, zh: 562 },
+            "张琪涵": { yw: 68, sx: 67, yy: 81, zz: 77.7, xx: 75, ty: 83.5, zh: 551.6 },
+            "张淑丽": { yw: 56, sx: 35, yy: 49.3, zz: 45, xx: 80, ty: 68.8, zh: 411.4 },
+            "章恩琪": { yw: 62.3, sx: 40.7, yy: 49.5, zz: 50, xx: 74, ty: 71.8, zh: 436.8 },
+            "郑馨潼": { yw: 69.3, sx: 42.3, yy: 61.7, zz: 54.3, xx: 81, ty: 71.8, zh: 471.1 },
+            "周昱杭": { yw: 60.3, sx: 68.7, yy: 76.3, zz: 65.7, xx: 85.5, ty: 87, zh: 550.4 },
+            "庄江森": { yw: 53.7, sx: 25.3, yy: 48.5, zz: 37.3, xx: 16, ty: 73, zh: 298.6 },
+            "王紫鑫": { yw: 60.3, sx: 40.3, yy: 74.5, zz: 60.7, xx: 75, ty: 84.5, zh: 495.8 },
+            "钟舒航": { yw: 63, sx: 78, yy: 72.5, zz: 56.3, xx: 74.5, ty: 79, zh: 542.4 },
+            "洪思鑫": { yw: 59.7, sx: 17.7, yy: 27.5, zz: 35.7, xx: 60, ty: 70.5, zh: 319.3 },
+            "石储宁": { yw: 57, sx: 40, yy: 59, zz: "免", xx: "免", ty: "缺", zh: 234 }
+        };
+
+        const seatRows = [
+            [{n:"陈子桢",i:35}, {n:"陈俊兴",i:28}, {n:"刘俊豪",i:34}, {n:"杨译鹏",i:38}, {n:"陈涛",i:36}, {n:"洪思鑫",i:48}, {n:"陈毅斌",i:41}],
+            [{n:"陈海林",i:30}, {n:"周昱杭",i:37}, {n:"许思汝",i:6}, {n:"林智玲",i:10}, {n:"江利彬",i:39}, {n:"庄江森",i:16}, {n:"石储宁",i:26}],
+            [{n:"董泽坤",i:27}, {n:"颜天旭",i:32}, {n:"刘芳冰",i:4}, {n:"王静怡",i:5}, {n:"林绍彤",i:7}, {n:"陈姝涵",i:17}, {n:"石航",i:40}],
+            [{n:"陈晓婷",i:15,suspended:true}, {n:"倪晗曦",i:45}, {n:"章恩琪",i:12}, {n:"黄芷颍",i:14}, {n:"郑馨潼",i:1}, {n:"张淑丽",i:23}, {n:"许煜豪",i:29}],
+            [{n:"王琴纹",i:2}, {n:"陈诗钰",i:3}, {n:"张琪涵",i:25}, {n:"蔡晓凤",i:24}, {n:"苏铃艳",i:8}, {n:"杨冬莲",i:11}, {n:"钟舒航",i:47}],
+            [{n:"尤麒源",i:22}, {n:"吴永杰",i:31}, {n:"于静仪",i:33}, {n:"曾雪凌",i:13}, {n:"王梦琪",i:9}, {n:"曾如萍",i:18}, {n:"王紫鑫",i:46}],
+            [{n:"王钰滢",i:42}, {n:"李珊",i:44}, {n:"王思璐",i:43}, {n:"陈诗琪",i:19}, {n:"黄婉婷",i:20}, {n:"刘诗婷",i:21}, null]
+        ];
+
+        const subjects = [
+            {k:'math', t:'数学'}, {k:'chinese', t:'语文'}, {k:'english', t:'英语'},
+            {k:'politics', t:'政治'}, {k:'info', t:'信息'}, {k:'general', t:'通用'},
+            {k:'all', t:'全科'}
+        ];
+
+        let state = {
+            date: '',
+            subject: 'math',
+            records: {}, 
+            notes: {},
+            isLocked: true,
+            editingId: null
+        };
+        
+        let editingStudent = null;
+        let tempDetailStatus = null;
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const now = new Date();
+            const year = now.getFullYear();
+            const month = String(now.getMonth() + 1).padStart(2, '0');
+            const day = String(now.getDate()).padStart(2, '0');
+            state.date = `${year}-${month}-${day}`;
+            
+            initSubjects();
+            renderGrid();
+            
+            const dp = document.getElementById('date-picker');
+            dp.value = state.date;
+            dp.onchange = (e) => {
+                state.date = e.target.value;
+                loadData();
+            };
+            
+            loadData();
+            updateLockUI();
+        });
+
+        function initSubjects() {
+            const el = document.getElementById('subject-container');
+            subjects.forEach(s => {
+                const btn = document.createElement('div');
+                btn.className = `sub-pill ${s.k === state.subject ? 'active' : ''}`;
+                btn.innerText = s.t;
+                btn.onclick = () => {
+                    document.querySelectorAll('.sub-pill').forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    state.subject = s.k;
+                    loadData();
+                };
+                el.appendChild(btn);
+            });
+        }
+
+        function renderGrid() {
+            const grid = document.getElementById('grid');
+            grid.innerHTML = '';
+            seatRows.forEach(row => {
+                row.forEach(s => {
+                    if (!s) { grid.appendChild(document.createElement('div')); return; }
+                    const card = document.createElement('div');
+                    card.className = `card ${s.suspended ? 'suspended' : ''}`;
+                    card.dataset.name = s.n;
+                    card.innerHTML = `<div class="c-name">${s.n}</div><div class="c-no">${s.i}</div>`;
+                    if (!s.suspended) attachEvents(card, s.n);
+                    grid.appendChild(card);
+                });
+            });
+        }
+
+        function attachEvents(element, name) {
+            let timer;
+            let isLongPress = false;
+            let isScrolling = false;
+
+            const start = () => {
+                isScrolling = false;
+                isLongPress = false;
+                timer = setTimeout(() => {
+                    if (!isScrolling && !state.isLocked) {
+                        isLongPress = true; 
+                        openDetailModal(name); 
+                    } 
+                }, 600);
+            };
+
+            const move = () => {
+                isScrolling = true; 
+                clearTimeout(timer);
+            };
+
+            const end = (e) => {
+                clearTimeout(timer);
+                if (!isLongPress && !isScrolling) {
+                    if (state.isLocked) {
+                        showToast("🔒 请先解锁");
+                    } else {
+                        toggleStatus(name);
+                    }
+                }
+            };
+
+            element.addEventListener('touchstart', start);
+            element.addEventListener('touchmove', move); 
+            element.addEventListener('touchend', (e) => {
+                if(e.cancelable) e.preventDefault(); 
+                end(e); 
+            });
+            element.addEventListener('mousedown', start);
+            element.addEventListener('mouseup', end);
+        }
+
+        function toggleStatus(name) {
+            const curr = state.records[name] || 'unsubmitted';
+            const flow = { 
+                'unsubmitted': 'finished', 
+                'finished': 'unfinished', 
+                'unfinished': 'late', 
+                'late': 'unchecked', 
+                'unchecked': 'unsubmitted' 
+            };
+            setStatus(name, flow[curr]);
+        }
+
+        function setStatus(name, st) {
+            state.records[name] = st;
+            updateCardVisual(name);
+            updateStats();
+        }
+
+        function updateCardVisual(name) {
+            const card = document.querySelector(`.card[data-name="${name}"]`);
+            if (!card) return;
+            const st = state.records[name] || 'unsubmitted';
+            const note = state.notes[name];
+            card.className = 'card';
+            if (st !== 'unsubmitted') card.classList.add(st);
+            if (note && note.trim() !== '') card.classList.add('has-note');
+        }
+
+        function updateStats() {
+            let f=0, u=0, l=0, n=0;
+            Object.values(state.records).forEach(v => {
+                if (v === 'finished') f++; 
+                if (v === 'unfinished') u++; 
+                if (v === 'late') l++;
+                if (v === 'unchecked') n++;
+            });
+            document.getElementById('cnt-fin').innerText = f;
+            document.getElementById('cnt-unfin').innerText = u;
+            document.getElementById('cnt-late').innerText = l;
+            document.getElementById('cnt-unch').innerText = n;
+        }
+
+        // === 详情与成绩 ===
+        function openDetailModal(name) {
+            editingStudent = name;
+            tempDetailStatus = state.records[name] || 'unsubmitted';
+            document.getElementById('dm-name').innerText = name;
+            document.getElementById('dm-note').value = state.notes[name] || '';
+            updateDetailButtons(tempDetailStatus);
+            renderScorePanel(name);
+            document.getElementById('detail-modal').style.display = 'flex';
+        }
+
+        function renderScorePanel(name) {
+            const container = document.getElementById('score-display');
+            const s = scoreData[name];
+            if (!s) {
+                container.innerHTML = '<div style="text-align:center;color:#666;font-size:0.8rem;">暂无成绩数据</div>';
+                return;
+            }
+
+            const getScoreHtml = (label, val) => {
+                const num = parseFloat(val);
+                let colorClass = '';
+                if (!isNaN(num) && num < 70) colorClass = 'fail'; 
+                return `<div class="score-item"><div class="sc-label">${label}</div><div class="sc-val ${colorClass}">${val}</div></div>`;
+            };
+
+            container.innerHTML = `
+                <div style="font-size:0.8rem; color:#94a3b8; margin-bottom:8px;">月考平均分 (低于70分标红)</div>
+                <div class="score-grid">
+                    ${getScoreHtml('语文', s.yw)}
+                    ${getScoreHtml('数学', s.sx)}
+                    ${getScoreHtml('英语', s.yy)}
+                    ${getScoreHtml('政治', s.zz)}
+                    ${getScoreHtml('信息', s.xx)}
+                    ${getScoreHtml('通用', s.ty)}
+                </div>
+                <div style="margin-top:8px; background:rgba(255,255,255,0.05); padding:8px; border-radius:4px; display:flex; justify-content:space-between; align-items:center;">
+                    <span style="font-size:0.85rem; color:#f1f5f9;">综合换算分</span>
+                    <span class="sc-val total">${s.zh}</span>
+                </div>
+            `;
+        }
+
+        function setDetailStatus(st) { tempDetailStatus = st; updateDetailButtons(st); }
+        function updateDetailButtons(st) {
+            document.querySelectorAll('.st-btn').forEach(b => b.classList.remove('active'));
+            const btns = document.querySelectorAll('.st-btn');
+            if(st==='finished') btns[0].classList.add('active');
+            if(st==='unfinished') btns[1].classList.add('active');
+            if(st==='late') btns[2].classList.add('active');
+            if(st==='unchecked') btns[3].classList.add('active');
+            if(st==='unsubmitted') btns[4].classList.add('active');
+        }
+
+        function saveDetail() {
+            if (editingStudent) {
+                state.records[editingStudent] = tempDetailStatus;
+                const note = document.getElementById('dm-note').value;
+                if(note && note.trim()) state.notes[editingStudent] = note.trim();
+                else delete state.notes[editingStudent];
+                updateCardVisual(editingStudent);
+                updateStats();
+                saveData(false); 
+            }
+            closeModal('detail-modal');
+        }
+
+        function getKey() { return 'hx_check_data_v11'; }
+
+        function saveData(showToastMsg = true) {
+            let all = JSON.parse(localStorage.getItem(getKey()) || '[]');
+            if (state.editingId) {
+                all = all.filter(r => r.ts !== state.editingId);
+            } else {
+                all = all.filter(r => !(r.date === state.date && r.subject === state.subject));
+            }
+            const newRecord = {
+                date: state.date, 
+                subject: state.subject,
+                content: document.getElementById('hw-content').value,
+                records: state.records, 
+                notes: state.notes, 
+                ts: state.editingId || Date.now() 
+            };
+            all.push(newRecord);
+            localStorage.setItem(getKey(), JSON.stringify(all));
+            if (showToastMsg) showToast('已保存');
+        }
+
+        function loadData() {
+            const all = JSON.parse(localStorage.getItem(getKey()) || '[]');
+            let entry = null;
+            if (state.editingId) entry = all.find(r => r.ts === state.editingId);
+            if (!entry) entry = all.find(r => r.date === state.date && r.subject === state.subject);
+
+            if (!entry) {
+                 state.records = {}; state.notes = {};
+                 document.getElementById('hw-content').value = '';
+                 if (!state.editingId) state.editingId = null; 
+            } else {
+                state.records = entry.records || {};
+                state.notes = entry.notes || {};
+                document.getElementById('hw-content').value = entry.content || '';
+            }
+            
+            document.querySelectorAll('.card').forEach(c => {
+                if(!c.classList.contains('suspended')) c.className = 'card';
+            });
+            Object.keys(state.records).forEach(n => updateCardVisual(n));
+            Object.keys(state.notes).forEach(n => updateCardVisual(n));
+            updateStats();
+        }
+
+        function openHistory() {
+            closeModal('menu-modal');
+            const list = document.getElementById('history-list');
+            list.innerHTML = '';
+            const all = JSON.parse(localStorage.getItem(getKey()) || '[]').sort((a,b) => b.ts - a.ts);
+            
+            if(all.length === 0) list.innerHTML = '<div style="text-align:center;color:#666;padding:20px;">无记录</div>';
+            
+            all.forEach(item => {
+                const subName = subjects.find(s=>s.k===item.subject)?.t || '未知';
+                const div = document.createElement('div');
+                div.className = 'h-item';
+                div.innerHTML = `
+                    <div class="h-info" onclick='loadHistoryItem(${JSON.stringify(item)})'>
+                        <div style="font-weight:bold; color:white;">${item.date} ${subName} <span style="font-size:0.7rem;color:#f59e0b;">[修改]</span></div>
+                        <div style="font-size:0.8rem; color:#94a3b8;">${item.content || '无作业内容'}</div>
+                    </div>
+                    <div class="h-del-btn" onclick="deleteRecord(${item.ts})">🗑</div>
+                `;
+                list.appendChild(div);
+            });
+            document.getElementById('history-modal').style.display = 'flex';
+        }
+
+        function loadHistoryItem(item) {
+            state.date = item.date;
+            state.subject = item.subject;
+            state.records = item.records || {};
+            state.notes = item.notes || {};
+            state.editingId = item.ts; 
+
+            document.getElementById('date-picker').value = state.date;
+            document.getElementById('hw-content').value = item.content || '';
+            document.querySelectorAll('.sub-pill').forEach(b => {
+                b.classList.remove('active');
+                if(b.innerText === (subjects.find(s=>s.k===item.subject)?.t)) b.classList.add('active');
+            });
+            
+            updateHeaderStatus(true);
+            
+            document.querySelectorAll('.card').forEach(c => {
+                if(!c.classList.contains('suspended')) c.className = 'card';
+            });
+            Object.keys(state.records).forEach(n => updateCardVisual(n));
+            Object.keys(state.notes).forEach(n => updateCardVisual(n));
+            updateStats();
+
+            closeModal('history-modal');
+            showToast('已载入历史记录');
+        }
+
+        function deleteRecord(ts) {
+            if(!confirm("确定删除？")) return;
+            let all = JSON.parse(localStorage.getItem(getKey()) || '[]');
+            all = all.filter(item => item.ts !== ts);
+            localStorage.setItem(getKey(), JSON.stringify(all));
+            openHistory();
+            showToast("已删除");
+        }
+
+        function toggleLock() {
+            state.isLocked = !state.isLocked;
+            updateLockUI();
+            const grid = document.getElementById('grid');
+            if(state.isLocked) grid.classList.add('grid-locked');
+            else grid.classList.remove('grid-locked');
+            showToast(state.isLocked ? "已锁定" : "已解锁");
+        }
+
+        function updateLockUI() {
+            const btn = document.getElementById('btn-lock');
+            const badge = document.getElementById('status-badge');
+            if (!state.editingId) {
+                if (state.isLocked) {
+                    btn.classList.remove('unlocked'); btn.innerHTML = '🔒';
+                    badge.className = 'mode-badge locked'; badge.innerText = '🔒 已锁定';
+                } else {
+                    btn.classList.add('unlocked'); btn.innerHTML = '🔓';
+                    badge.className = 'mode-badge editing'; badge.innerText = '🔓 编辑模式';
+                }
+            }
+        }
+
+        function updateHeaderStatus(isHistory) {
+            const badge = document.getElementById('status-badge');
+            if (isHistory) {
+                badge.className = 'mode-badge history';
+                badge.innerText = '📝 修改历史';
+            } else {
+                updateLockUI();
+            }
+        }
+
+        function openMenu() { document.getElementById('menu-modal').style.display = 'flex'; }
+        function closeModal(id) { document.getElementById(id).style.display = 'none'; }
+        
+        function batchSet(st) {
+            if(state.isLocked) { showToast("请先解锁"); return; }
+            seatRows.forEach(row => row.forEach(s => {
+                if(s && !s.suspended) state.records[s.n] = st;
+            }));
+            state.records = {...state.records};
+            Object.keys(state.records).forEach(n => updateCardVisual(n));
+            updateStats();
+            saveData(false);
+            closeModal('menu-modal');
+            showToast('批量完成 (已自动保存)');
+        }
+
+        // === 导出设置相关 ===
+        function openExportModal() {
+            closeModal('menu-modal');
+            // 默认日期为当前选择的日期
+            document.getElementById('export-start-date').value = state.date;
+            document.getElementById('export-end-date').value = state.date;
+            document.getElementById('export-modal').style.display = 'flex';
+        }
+
+        function doExport() {
+            const startDate = document.getElementById('export-start-date').value;
+            const endDate = document.getElementById('export-end-date').value;
+            
+            if (!startDate || !endDate) {
+                showToast('请选择开始和结束日期');
+                return;
+            }
+            if (startDate > endDate) {
+                showToast('开始日期不能晚于结束日期');
+                return;
+            }
+            
+            exportExcel(startDate, endDate);
+            closeModal('export-modal');
+        }
+
+        // === Excel 导出 (日期范围支持) ===
+        function exportExcel(startDate, endDate) {
+            const all = JSON.parse(localStorage.getItem(getKey()) || '[]');
+            
+            // 过滤日期范围
+            const filteredData = all.filter(r => r.date >= startDate && r.date <= endDate);
+            
+            if(filteredData.length === 0) { showToast('该时间段无数据'); return; }
+            
+            // 排序：日期 -> 科目 -> (学生名暂不排序，按默认记录顺序)
+            filteredData.sort((a, b) => {
+                if (a.date !== b.date) return a.date.localeCompare(b.date);
+                return 0; // 同一天的不强制排科目，按录入顺序
+            });
+
+            const keyMap = { 'math':'sx', 'chinese':'yw', 'english':'yy', 'politics':'zz', 'info':'xx', 'general':'ty' };
+            
+            let data = [];
+            
+            filteredData.forEach(r => {
+                const subName = subjects.find(s=>s.k===r.subject)?.t || r.subject;
+                
+                // 遍历该记录下所有有状态的学生
+                Object.keys(r.records).forEach(name => {
+                    const st = r.records[name];
+                    if(st && st !== 'unsubmitted') {
+                        let stTxt = '';
+                        if(st==='finished') stTxt='已完成';
+                        else if(st==='unfinished') stTxt='未完成';
+                        else if(st==='late') stTxt='补交';
+                        else if(st==='unchecked') stTxt='未检';
+
+                        // 获取平均分逻辑
+                        let avgScoreStr = '-';
+                        let isExempt = false;
+                        const sData = scoreData[name];
+
+                        if (sData) {
+                            if (r.subject === 'all') {
+                                // 全科：用综合分/6
+                                const rawZh = parseFloat(sData.zh);
+                                if (!isNaN(rawZh)) {
+                                    const avg = (rawZh / 6).toFixed(1);
+                                    avgScoreStr = avg;
+                                    if (avg > 70) isExempt = true;
+                                }
+                            } else {
+                                const key = keyMap[r.subject];
+                                if (key && sData[key] !== undefined) {
+                                    avgScoreStr = sData[key];
+                                    if (parseFloat(avgScoreStr) > 70) isExempt = true;
+                                }
+                            }
+                        }
+
+                        // 备注处理
+                        let note = r.notes?.[name] || '';
+                        if (isExempt) {
+                            // 自动追加免检备注
+                            note = note ? `${note} (平均分>70免检)` : `(平均分>70免检)`;
+                        }
+
+                        data.push({
+                            "日期": r.date, 
+                            "科目": subName, 
+                            "作业内容": r.content||'',
+                            "姓名": name, 
+                            "状态": stTxt, 
+                            "科目平均分": avgScoreStr,
+                            "备注": note
+                        });
+                    }
+                });
+            });
+            
+            if (data.length === 0) { showToast('所选范围内没有有效的学生记录'); return; }
+
+            const wb = XLSX.utils.book_new();
+            const ws = XLSX.utils.json_to_sheet(data);
+            
+            // 设置列宽 (可选)
+            ws['!cols'] = [
+                {wch: 12}, // 日期
+                {wch: 8},  // 科目
+                {wch: 20}, // 内容
+                {wch: 8},  // 姓名
+                {wch: 8},  // 状态
+                {wch: 10}, // 平均分
+                {wch: 25}  // 备注
+            ];
+
+            XLSX.utils.book_append_sheet(wb, ws, "作业记录");
+            XLSX.writeFile(wb, `作业检查_${startDate}_至_${endDate}.xlsx`);
+            showToast('导出成功');
+        }
+
+        function showToast(msg) {
+            const t = document.getElementById('toast');
+            t.innerText = msg; t.style.display = 'block';
+            setTimeout(() => t.style.display = 'none', 1500);
+        }
+    </script>
+</body>
+</html>
